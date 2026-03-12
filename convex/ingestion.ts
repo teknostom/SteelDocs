@@ -36,10 +36,11 @@ export const ingestRun = internalMutation({
     classes: v.array(classInputValidator),
   },
   handler: async (ctx, args) => {
-    // ── 1. Duplicate check ──────────────────────────────────────────────────
+    // ── 1. Duplicate check (scoped to branch so merges get processed) ───────
     const existing = await ctx.db
       .query("runs")
-      .withIndex("by_hash", (q) => q.eq("content_hash", args.content_hash))
+      .withIndex("by_branch", (q) => q.eq("branch", args.branch))
+      .filter((q) => q.eq(q.field("content_hash"), args.content_hash))
       .first();
 
     if (existing) {

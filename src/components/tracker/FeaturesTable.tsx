@@ -30,7 +30,7 @@ import {
   IconCode,
 } from "@tabler/icons-react"
 
-import type { RunMode } from "@/components/tracker/TrackerApp"
+import { type RunMode, SourceSelector, McVersionSelector } from "@/components/tracker/TrackerApp"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,7 +152,17 @@ const ITEMS_PER_PAGE = 50
 
 // ─── Main table ───────────────────────────────────────────────────────────────
 
-export function FeaturesTable({ mode, mcVersion }: { mode: RunMode; mcVersion: string }) {
+export function FeaturesTable({
+  mode,
+  mcVersion,
+  onModeChange,
+  onMcVersionChange
+}: {
+  mode: RunMode;
+  mcVersion: string;
+  onModeChange: (m: RunMode) => void;
+  onMcVersionChange: (v: string) => void;
+}) {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [currentPage, setCurrentPage] = React.useState(0)
@@ -248,7 +258,22 @@ export function FeaturesTable({ mode, mcVersion }: { mode: RunMode; mcVersion: s
     <>
       <div className="flex flex-col md:flex-row gap-6 md:items-start">
         {/* Left: filters */}
-        <div className="w-full md:w-48 shrink-0 flex flex-col gap-4 md:sticky md:top-20">
+        <div className="w-full md:w-64 shrink-0 flex flex-col gap-4 md:sticky md:top-20">
+          <p className="text-sm text-muted-foreground mb-3 opacity-0">easter egg</p>
+          <div className="flex gap-2 w-full">
+            <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+              <label className="text-xs font-medium text-muted-foreground whitespace-nowrap">Branch / PR</label>
+              <div className="[&>button]:w-full [&>button]:min-w-0">
+                <SourceSelector mode={mode} onModeChange={onModeChange} />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5 flex-[0.7] min-w-0">
+              <label className="text-xs font-medium text-muted-foreground whitespace-nowrap">Version</label>
+              <div className="[&>button]:w-full [&>button]:min-w-0">
+                <McVersionSelector mcVersion={mcVersion} onMcVersionChange={onMcVersionChange} />
+              </div>
+            </div>
+          </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Search</label>
             <input

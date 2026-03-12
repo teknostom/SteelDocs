@@ -21,7 +21,7 @@ export type RunMode =
 
 // ─── Source selector ──────────────────────────────────────────────────────────
 
-function SourceSelector({
+export function SourceSelector({
   mode,
   onModeChange,
 }: {
@@ -81,7 +81,7 @@ function SourceSelector({
 
 // ─── MC version selector ──────────────────────────────────────────────────────
 
-function McVersionSelector({
+export function McVersionSelector({
   mcVersion,
   onMcVersionChange,
 }: {
@@ -124,11 +124,7 @@ function TrackerAppInner({ pathname }: { pathname: string }) {
       <main className="flex flex-col pt-16 min-h-screen">
         <div className="@container/main flex flex-1 flex-col gap-2">
           <div className="flex flex-col gap-4 py-4 px-3 sm:px-4 md:gap-6 md:py-6 md:px-6 max-w-7xl mx-auto w-full">
-            {/* Selectors bar */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <McVersionSelector mcVersion={mcVersion} onMcVersionChange={setMcVersion} />
-              <SourceSelector mode={mode} onModeChange={setMode} />
-            </div>
+            {/* Selectors moved to FeaturesTable */}
 
             {isError ? (
               <div className="flex flex-col items-center justify-center py-24 text-center mt-8">
@@ -143,7 +139,12 @@ function TrackerAppInner({ pathname }: { pathname: string }) {
             ) : mcVersion ? (
               <>
                 <SectionCards mode={mode} mcVersion={mcVersion} />
-                <FeaturesTable mode={mode} mcVersion={mcVersion} />
+                <FeaturesTable
+                  mode={mode}
+                  mcVersion={mcVersion}
+                  onModeChange={setMode}
+                  onMcVersionChange={setMcVersion}
+                />
               </>
             ) : null}
           </div>
