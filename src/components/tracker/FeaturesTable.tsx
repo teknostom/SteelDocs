@@ -4,7 +4,6 @@ import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { api } from "@convex/_generated/api"
-import type { Id } from "@convex/_generated/dataModel"
 
 import {
   Table,
@@ -31,6 +30,8 @@ import {
   IconCode,
 } from "@tabler/icons-react"
 
+import type { RunMode } from "@/components/tracker/TrackerApp"
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ClassType =
@@ -38,7 +39,19 @@ type ClassType =
   | "ai_goal" | "ai_brain" | "ai_control" | "ai_pathing"
   | "other"
 
-// ─── Type badge ───────────────────────────────────────────────────────────────
+type ProgressFilter = "not_started" | "wip" | "implemented"
+
+/** Shared shape returned by both classesByBranch and bestClasses queries. */
+type ClassRow = {
+  _id: string
+  _creationTime: number
+  class_name: string
+  class_type: ClassType
+  run_id: string
+  percentage_implemented: number
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const TYPE_STYLES: Record<ClassType, string> = {
   block: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20",
@@ -85,6 +98,8 @@ const PROGRESS_FILTER_SELECTED: Record<ProgressFilter, string> = {
   implemented: "bg-green-500 border-green-500 text-white",
 }
 
+// ─── Small components ─────────────────────────────────────────────────────────
+
 function TypeBadge({ type }: { type: ClassType }) {
   return (
     <Badge variant="outline" className={`font-mono text-xs ${TYPE_STYLES[type]}`}>
@@ -92,8 +107,6 @@ function TypeBadge({ type }: { type: ClassType }) {
     </Badge>
   )
 }
-
-// ─── Progress bar ─────────────────────────────────────────────────────────────
 
 function ProgressCell({ pct }: { pct: number }) {
   const barColor =
@@ -116,42 +129,38 @@ function ProgressCell({ pct }: { pct: number }) {
   )
 }
 
-// ─── Main table ───────────────────────────────────────────────────────────────
+// ─── Filter options ───────────────────────────────────────────────────────────
 
-const TYPE_OPTIONS: { value: ClassType; label: string; color: string }[] = [
-  { value: "block", label: "Block", color: "text-blue-600 dark:text-blue-400" },
-  { value: "entity", label: "Entity", color: "text-purple-600 dark:text-purple-400" },
-  { value: "item", label: "Item", color: "text-pink-600 dark:text-pink-400" },
-  { value: "ai_goal", label: "AI Goal", color: "text-teal-600 dark:text-teal-400" },
-  { value: "ai_brain", label: "AI Brain", color: "text-teal-600 dark:text-teal-400" },
-  { value: "ai_control", label: "AI Control", color: "text-teal-600 dark:text-teal-400" },
-  { value: "ai_pathing", label: "AI Pathing", color: "text-teal-600 dark:text-teal-400" },
-  { value: "other", label: "Other", color: "text-zinc-500 dark:text-zinc-400" },
+const TYPE_OPTIONS: { value: ClassType; label: string }[] = [
+  { value: "block", label: "Block" },
+  { value: "entity", label: "Entity" },
+  { value: "item", label: "Item" },
+  { value: "ai_goal", label: "AI Goal" },
+  { value: "ai_brain", label: "AI Brain" },
+  { value: "ai_control", label: "AI Control" },
+  { value: "ai_pathing", label: "AI Pathing" },
+  { value: "other", label: "Other" },
 ]
 
-type ProgressFilter = "not_started" | "wip" | "implemented"
-
-const PROGRESS_OPTIONS: { value: ProgressFilter; label: string; color: string }[] = [
-  { value: "not_started", label: "Not started", color: "text-muted-foreground" },
-  { value: "wip", label: "In progress", color: "text-amber-500" },
-  { value: "implemented", label: "Implemented", color: "text-green-500" },
+const PROGRESS_OPTIONS: { value: ProgressFilter; label: string }[] = [
+  { value: "not_started", label: "Not started" },
+  { value: "wip", label: "In progress" },
+  { value: "implemented", label: "Implemented" },
 ]
 
 const ITEMS_PER_PAGE = 50
 
+// ─── Main table ───────────────────────────────────────────────────────────────
 
-export function FeaturesTable() {
+export function FeaturesTable({ mode, mcVersion }: { mode: RunMode; mcVersion: string }) {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [currentPage, setCurrentPage] = React.useState(0)
-  const [branch, setBranch] = React.useState("")
   const [typeFilter, setTypeFilter] = React.useState<Set<ClassType>>(
     new Set(TYPE_OPTIONS.map((o) => o.value))
   )
-  const [progressFilter, setProgressFilter] = React.useState<Set<ProgressFilter>>(
-    new Set()
-  )
-  const [selectedId, setSelectedId] = React.useState<Id<"class_snapshots"> | null>(null)
+  const [progressFilter, setProgressFilter] = React.useState<Set<ProgressFilter>>(new Set())
+  const [selectedClassName, setSelectedClassName] = React.useState<string | null>(null)
   const [sheetOpen, setSheetOpen] = React.useState(false)
 
   const toggleType = (value: ClassType) => {
@@ -182,51 +191,56 @@ export function FeaturesTable() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  React.useEffect(() => {
-    setCurrentPage(0)
-  }, [branch])
+  React.useEffect(() => { setCurrentPage(0) }, [mode, mcVersion])
 
-  const { data: latestRun, isPending: latestRunPending } = useQuery(
-    convexQuery(api.queries.latestRun, branch ? { branch } : {})
+  // Fetch classes depending on mode
+  const { data: branchClasses, isPending: branchPending } = useQuery(
+    convexQuery(
+      api.queries.classesByBranch,
+      mode.type !== "all" ? { branch: mode.branch, mc_version: mcVersion } : "skip"
+    )
   )
-  const { data: allClasses, isPending: allClassesPending } = useQuery({
-    ...convexQuery(api.queries.classesOverview, { run_id: latestRun?._id as Id<"runs"> }),
-    enabled: !!latestRun,
-  })
+  const { data: allClasses, isPending: allPending } = useQuery(
+    convexQuery(
+      api.queries.bestClasses,
+      mode.type === "all" ? { mc_version: mcVersion } : "skip"
+    )
+  )
+
+  const rawClasses = (mode.type === "all" ? allClasses : branchClasses) as ClassRow[] | undefined
+  const isLoading = mode.type === "all" ? allPending : branchPending
 
   const filtered = React.useMemo(() => {
-    let result = allClasses ?? []
+    let result = rawClasses ?? []
     if (debouncedSearch) {
       const q = debouncedSearch.toLowerCase()
       result = result.filter((c) => c.class_name.toLowerCase().includes(q))
     }
     if (typeFilter.size < TYPE_OPTIONS.length) {
-      result = result.filter((c) => typeFilter.has(c.class_type))
+      result = result.filter((c) => typeFilter.has(c.class_type as ClassType))
     }
     if (progressFilter.size > 0) {
       result = result.filter((c) => {
-        const pct = c.percentage_implemented
-        if (progressFilter.has("not_started") && pct === 0) return true
-        if (progressFilter.has("wip") && pct > 0 && pct < 100) return true
-        if (progressFilter.has("implemented") && pct === 100) return true
+        const p = c.percentage_implemented
+        if (progressFilter.has("not_started") && p === 0) return true
+        if (progressFilter.has("wip") && p > 0 && p < 100) return true
+        if (progressFilter.has("implemented") && p === 100) return true
         return false
       })
     }
     return result
-  }, [allClasses, debouncedSearch, typeFilter, progressFilter])
+  }, [rawClasses, debouncedSearch, typeFilter, progressFilter])
 
   const totalCount = filtered.length
   const totalPages = Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE))
   const paginated = filtered.slice(currentPage * ITEMS_PER_PAGE, (currentPage + 1) * ITEMS_PER_PAGE)
-
-  const isLoading = latestRunPending || (!!latestRun && allClassesPending)
 
   if (isLoading) return <FeaturesTableSkeleton />
 
   return (
     <>
       <div className="flex flex-col md:flex-row gap-6 md:items-start">
-        {/* Left: filters panel */}
+        {/* Left: filters */}
         <div className="w-full md:w-48 shrink-0 flex flex-col gap-4 md:sticky md:top-20">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Search</label>
@@ -235,16 +249,6 @@ export function FeaturesTable() {
               placeholder="Feature name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-9 w-full px-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Branch</label>
-            <input
-              type="text"
-              placeholder="No filter"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
               className="h-9 w-full px-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
@@ -298,15 +302,12 @@ export function FeaturesTable() {
           </div>
         </div>
 
-        {/* Right: pagination + table */}
+        {/* Right: table */}
         <div className="flex-1 min-w-0 flex flex-col gap-3">
-          {/* Pagination */}
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">
-              {latestRun === null ? (
-                <span className="text-amber-600">
-                  {branch ? `No run found for "${branch}"` : "No run found"}
-                </span>
+              {rawClasses === null ? (
+                <span className="text-amber-600">No data found</span>
               ) : totalCount > 0 ? (
                 <>{totalCount} features</>
               ) : (
@@ -315,9 +316,7 @@ export function FeaturesTable() {
             </p>
             <div className="flex items-center gap-2">
               <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
+                variant="outline" size="icon" className="h-8 w-8"
                 onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
                 disabled={currentPage === 0}
               >
@@ -336,9 +335,7 @@ export function FeaturesTable() {
                 <span className="text-muted-foreground">of {totalPages}</span>
               </div>
               <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
+                variant="outline" size="icon" className="h-8 w-8"
                 onClick={() => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={currentPage >= totalPages - 1}
               >
@@ -369,17 +366,13 @@ export function FeaturesTable() {
                       <TableCell>
                         <button
                           className="font-mono text-sm text-left hover:underline decoration-2 hover:font-bold hover:text-emerald-400 underline-offset-2 text-foreground"
-                          onClick={() => { setSelectedId(cls._id); setSheetOpen(true) }}
+                          onClick={() => { setSelectedClassName(cls.class_name); setSheetOpen(true) }}
                         >
                           {cls.class_name}
                         </button>
                       </TableCell>
-                      <TableCell>
-                        <TypeBadge type={cls.class_type} />
-                      </TableCell>
-                      <TableCell>
-                        <ProgressCell pct={cls.percentage_implemented} />
-                      </TableCell>
+                      <TableCell><TypeBadge type={cls.class_type as ClassType} /></TableCell>
+                      <TableCell><ProgressCell pct={cls.percentage_implemented} /></TableCell>
                     </TableRow>
                   ))
                 )}
@@ -392,8 +385,8 @@ export function FeaturesTable() {
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent className="sm:max-w-lg overflow-y-auto">
           <SheetTitle className="sr-only">Feature details</SheetTitle>
-          {selectedId && (
-            <ClassSheet id={selectedId} branch={branch} />
+          {selectedClassName && (
+            <ClassSheet className={selectedClassName} mode={mode} mcVersion={mcVersion} />
           )}
         </SheetContent>
       </Sheet>
@@ -403,22 +396,40 @@ export function FeaturesTable() {
 
 // ─── Detail sheet ─────────────────────────────────────────────────────────────
 
-function ClassSheet({ id, branch }: { id: Id<"class_snapshots">; branch: string }) {
-  const { data: cls, isPending: clsPending } = useQuery(
-    convexQuery(api.queries.classById, { id })
+function ClassSheet({
+  className,
+  mode,
+  mcVersion,
+}: {
+  className: string
+  mode: RunMode
+  mcVersion: string
+}) {
+  const { data: branchCls, isPending: branchPending } = useQuery(
+    convexQuery(
+      api.queries.classByBranchAndName,
+      mode.type !== "all" ? { branch: mode.branch, mc_version: mcVersion, class_name: className } : "skip"
+    )
   )
+  const { data: bestCls, isPending: bestPending } = useQuery(
+    convexQuery(
+      api.queries.bestClassByName,
+      mode.type === "all" ? { mc_version: mcVersion, class_name: className } : "skip"
+    )
+  )
+
+  const cls = mode.type === "all" ? bestCls : branchCls
+  const isPending = mode.type === "all" ? bestPending : branchPending
+
   const { data: run } = useQuery(
     convexQuery(api.queries.runById, cls?.run_id ? { id: cls.run_id } : "skip")
   )
-  const { data: history } = useQuery({
-    ...convexQuery(
-      api.queries.classHistory,
-      { class_name: cls?.class_name ?? "", ...(branch ? { branch } : {}) }
-    ),
-    enabled: !!cls?.class_name,
-  })
 
-  if (clsPending || cls === undefined) {
+  const { data: history } = useQuery(
+    convexQuery(api.queries.classChangesHistory, { mc_version: mcVersion, class_name: className })
+  )
+
+  if (isPending || cls === undefined) {
     return (
       <>
         <SheetHeader>
@@ -432,7 +443,7 @@ function ClassSheet({ id, branch }: { id: Id<"class_snapshots">; branch: string 
     )
   }
 
-  if (cls === null) return null
+  if (!cls) return null
 
   const implemented = cls.methods.filter((m) => m.status === "Implemented")
   const notImplemented = cls.methods.filter((m) => m.status === "NotImplemented")
@@ -443,7 +454,7 @@ function ClassSheet({ id, branch }: { id: Id<"class_snapshots">; branch: string 
         <SheetTitle className="font-mono text-base">{cls.class_name}</SheetTitle>
         <SheetDescription asChild>
           <div className="flex items-center gap-2 mt-1">
-            <TypeBadge type={cls.class_type} />
+            <TypeBadge type={cls.class_type as ClassType} />
             <span className="text-xs text-muted-foreground">
               {implemented.length}/{cls.methods.length} methods implemented
             </span>
@@ -459,7 +470,9 @@ function ClassSheet({ id, branch }: { id: Id<"class_snapshots">; branch: string 
       {/* Run info */}
       {run && (
         <div className="mt-4 mx-4 rounded-md border bg-muted/30 px-3 py-2.5 space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground mb-2">Run</p>
+          <p className="text-xs font-medium text-muted-foreground mb-2">
+            {mode.type === "all" ? "Best seen in" : "Run"}
+          </p>
           <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <span className="text-muted-foreground">Commit</span>
             <span className="font-mono">{run.commit_sha.slice(0, 7)}</span>
@@ -485,12 +498,9 @@ function ClassSheet({ id, branch }: { id: Id<"class_snapshots">; branch: string 
           <IconCode className="size-4" />
           Methods ({cls.methods.length})
         </h4>
-
         {implemented.length > 0 && (
           <div>
-            <p className="text-xs text-muted-foreground mb-2">
-              Implemented ({implemented.length})
-            </p>
+            <p className="text-xs text-muted-foreground mb-2">Implemented ({implemented.length})</p>
             <div className="flex flex-wrap gap-1.5">
               {implemented.map((m, i) => (
                 <Badge key={i} variant="secondary" className="text-xs font-mono gap-1">
@@ -501,12 +511,9 @@ function ClassSheet({ id, branch }: { id: Id<"class_snapshots">; branch: string 
             </div>
           </div>
         )}
-
         {notImplemented.length > 0 && (
           <div>
-            <p className="text-xs text-muted-foreground mb-2">
-              Not implemented ({notImplemented.length})
-            </p>
+            <p className="text-xs text-muted-foreground mb-2">Not implemented ({notImplemented.length})</p>
             <div className="flex flex-wrap gap-1.5">
               {notImplemented.slice(0, 16).map((m, i) => (
                 <Badge key={i} variant="outline" className="text-xs font-mono gap-1 text-muted-foreground">
@@ -533,6 +540,9 @@ function ClassSheet({ id, branch }: { id: Id<"class_snapshots">; branch: string 
               <div key={i} className="flex items-center gap-3 text-sm">
                 <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">
                   {entry.commit_sha.slice(0, 7)}
+                </span>
+                <span className="font-mono text-xs text-muted-foreground w-16 shrink-0 truncate">
+                  {entry.branch}
                 </span>
                 <ProgressCell pct={entry.percentage_implemented} />
               </div>

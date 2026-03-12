@@ -17,7 +17,14 @@ export const methodStatusValidator = v.union(
   v.literal("NotImplemented")
 );
 
+export const methodValidator = v.object({
+  method_name: v.string(),
+  status: methodStatusValidator,
+});
+
 export default defineSchema({
+  // ─── Core run registry ──────────────────────────────────────────────────────
+
   runs: defineTable({
     commit_sha: v.string(),
     branch: v.string(),
@@ -30,23 +37,78 @@ export default defineSchema({
     .index("by_branch", ["branch", "triggered_at"])
     .index("by_hash", ["content_hash"]),
 
-  class_snapshots: defineTable({
+  // ─── Selector sources (auto-maintained via triggers) ────────────────────────
+
+  /** One entry per unique branch or PR that has had at least one run. */
+  sources: defineTable({
+    branch: v.string(),
+    pr_number: v.optional(v.number()),
+  })
+    .index("by_branch", ["branch"])
+    .index("by_pr", ["pr_number"]),
+
+  /** One entry per unique Minecraft version that has had at least one run. */
+  mc_versions: defineTable({
+    version: v.string(),
+  })
+    .index("by_version", ["version"]),
+
+  // ─── Class data ─────────────────────────────────────────────────────────────
+
+  /**
+   * Full sorted list of all class names per MC version.
+   * Inserted once per mc_version. Provides the denominator for stats.
+   */
+  class_registry: defineTable({
+    mc_version: v.string(),
+    class_names: v.array(v.string()),
+  })
+    .index("by_version", ["mc_version"]),
+
+  /**
+   * Materialized current state per (branch × mc_version × class).
+   * Upserted on every run. Powers the Branch/PR display mode.
+   */
+  class_current: defineTable({
+    branch: v.string(),
+    mc_version: v.string(),
+    class_name: v.string(),
+    class_type: classTypeValidator,
     run_id: v.id("runs"),
+    percentage_implemented: v.number(),
+    methods: v.array(methodValidator),
+  })
+    .index("by_branch_mc", ["branch", "mc_version"])
+    .index("by_branch_mc_class", ["branch", "mc_version", "class_name"]),
+
+  /**
+   * Delta log: inserted only when a class's methods change vs the previous run
+   * on the same branch. Powers class history and attribution.
+   */
+  class_changes: defineTable({
+    run_id: v.id("runs"),
+    mc_version: v.string(),
     class_name: v.string(),
     class_type: classTypeValidator,
     percentage_implemented: v.number(),
-    methods: v.array(
-      v.object({
-        method_name: v.string(),
-        status: methodStatusValidator,
-      })
-    ),
+    methods: v.array(methodValidator),
   })
-    .index("by_run", ["run_id"])
-    .index("by_class_name", ["class_name"])
-    .index("by_run_and_type", ["run_id", "class_type"])
-    .searchIndex("search_class_name", {
-      searchField: "class_name",
-      filterFields: ["class_type", "run_id"],
-    }),
+    .index("by_mc_class", ["mc_version", "class_name"])
+    .index("by_run", ["run_id"]),
+
+  /**
+   * Best known state per (mc_version × class), across all branches.
+   * Updated when a class_change has a higher % than the current best.
+   * Powers the "All (best)" display mode.
+   */
+  class_best: defineTable({
+    mc_version: v.string(),
+    class_name: v.string(),
+    class_type: classTypeValidator,
+    run_id: v.id("runs"),
+    percentage_implemented: v.number(),
+    methods: v.array(methodValidator),
+  })
+    .index("by_mc_version", ["mc_version"])
+    .index("by_mc_class", ["mc_version", "class_name"]),
 });

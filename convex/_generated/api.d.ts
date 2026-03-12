@@ -14,6 +14,7 @@ import type * as http from "../http.js";
 import type * as ingestion from "../ingestion.js";
 import type * as permissions from "../permissions.js";
 import type * as queries from "../queries.js";
+import type * as triggers from "../triggers.js";
 
 import type {
   ApiFromModules,
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   ingestion: typeof ingestion;
   permissions: typeof permissions;
   queries: typeof queries;
+  triggers: typeof triggers;
 }>;
 
 /**
